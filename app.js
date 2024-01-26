@@ -1,5 +1,12 @@
 "use strict";
-
+const { MongoClient, ServerApiVersion } = require('mongodb');
+const client = new MongoClient(process.env.MONGO_URI, {
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true,
+  }
+});
 const token = process.env.WHATSAPP_TOKEN;
 const express = require("express"),
   body_parser = require("body-parser"),
@@ -40,8 +47,22 @@ app.post("/webhook", (req, res) => {
         let qrText = createQRText(visitorInfo);
         let qr_url = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(qrText)}`;
         sendImage(phone_number_id, from, qr_url);
+        insertVisita(qr_url, "Pablo"); //Insertar en la base de datos
       }
-    } else {
+    } 
+    else if (!msg_body.startsWith("/")) { // Nueva lógica para nombres
+      let visitorInfo = `Nombre: ${msg_body}\nNota: Registro creado por 24 horas a partir de ahora`;
+      let preQRMessage = `La llave de entrada y salida para ${msg_body} Visitante es: `;
+      sendMessage(phone_number_id, from, preQRMessage);
+
+      let qrText = createQRText(visitorInfo);
+      let qr_url = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(
+        qrText
+      )}`;
+      sendImage(phone_number_id, from, qr_url);
+      insertVisita(qr_url, "Pablo"); //Insertar en la base de datos
+    }
+    else {
       let errorMessage = "Comando no encontrado, utiliza las palabras clave";
       sendMessage(phone_number_id, from, errorMessage);
 
@@ -125,3 +146,48 @@ app.get("/webhook", (req, res) => {
     }
   }
 });
+
+//Funcion para insertar los datos del visitante en la base de datos
+async function insertVisita(codigo, idResidente){
+  //Generar instancia de fecha
+  var fecha = new Date();
+
+  //Obtener datos para la hora
+  var horas = fecha.getHours();
+  var minutos = fecha.getMinutes();
+  var segundos = fecha.getSeconds();
+
+  //Obtener datos para la fecha
+  var day = fecha.getDate();
+  var month = fecha.getMonth() + 1;
+  var year = fecha.getFullYear();
+
+  //Formato de hora y fecha
+  var hora = horas + ":" + minutos + ":" + segundos;
+  var fechaInicio = day + "-" + month + "-" + year;
+  var fechaFinal = (day + 1) + "-" + month + "-" + year;
+  var estado = "Pendiente";
+
+  //Iniciar conexión con la base de datos
+  try{
+      await client.connect();
+
+      const dataBase = client.db('ChatBot');
+      const collectionVisitas = dataBase.collection("Visitante");
+      const newVisit = {Fecha_Inicio : fechaInicio,
+                      Hora_Inicio : hora,
+                      Fecha_Final : fechaFinal,
+                      Hora_Final : hora,
+                      Estado : estado,
+                      Codigo_Qr : codigo,
+                      Id_Residente: idResidente};
+      
+      const result = await collectionVisitas.insertOne(newVisit);
+
+  }
+  finally{
+      //Cerrar conexion
+      await client.close();
+  }
+
+};
